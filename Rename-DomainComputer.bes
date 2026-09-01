@@ -110,7 +110,7 @@ function Write-Log {{
     $line = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss') + '  ' + $Message
     Write-Output $line
     Add-Content -LiteralPath $LogPath -Value $line -Encoding ASCII
-}}
+}
 
 try {{
     New-Item -ItemType Directory -Path (Split-Path -Parent $LogPath) -Force | Out-Null
@@ -124,17 +124,17 @@ try {{
     if (-not $isAdmin) {{
         Write-Log 'ERROR: not running with an Administrators token.'
         exit 12
-    }}
+    }
 
     if ($NewName.Length -gt 15 -or $NewName -notmatch '^[A-Za-z0-9][A-Za-z0-9-]*$' -or $NewName -match '^[0-9]+$') {{
         Write-Log ('ERROR: invalid NetBIOS computer name: ' + $NewName)
         exit 10
-    }}
+    }
 
     if ($env:COMPUTERNAME -eq $NewName) {{
         Write-Log 'Computer already has the requested name. Nothing to do.'
         exit 0
-    }}
+    }
 
     $collision = $false
     try {{
@@ -142,15 +142,15 @@ try {{
         $searcher.Filter = '(&(objectCategory=computer)(cn=' + $NewName + '))'
         if ($null -ne $searcher.FindOne()) {{
             $collision = $true
-        }}
-    }}
+        }
+    }
     catch {{
         Write-Log ('WARNING: AD pre-flight check skipped: ' + $_.Exception.Message)
-    }}
+    }
     if ($collision) {{
         Write-Log ('ERROR: an AD computer object named ' + $NewName + ' already exists.')
         exit 11
-    }}
+    }
 
     Write-Log ('Renaming ' + $env:COMPUTERNAME + ' to ' + $NewName)
     $renamed = $false
@@ -158,37 +158,37 @@ try {{
         Rename-Computer -NewName $NewName -Force -ErrorAction Stop
         $renamed = $true
         Write-Log 'Rename-Computer succeeded.'
-    }}
+    }
     catch {{
         # Rename-Computer may reject a null credential; the CIM method uses the caller's token.
         Write-Log ('Rename-Computer failed: ' + $_.Exception.Message)
-        $result = Invoke-CimMethod -ClassName Win32_ComputerSystem -MethodName Rename -Arguments @{{ Name = $NewName }}
+        $result = Invoke-CimMethod -ClassName Win32_ComputerSystem -MethodName Rename -Arguments @{{ Name = $NewName }
         if ($result.ReturnValue -eq 0) {{
             $renamed = $true
             Write-Log 'Win32_ComputerSystem.Rename succeeded.'
-        }}
+        }
         else {{
             Write-Log ('Win32_ComputerSystem.Rename failed with return value ' + $result.ReturnValue)
-        }}
-    }}
+        }
+    }
     if (-not $renamed) {{
         exit 12
-    }}
+    }
 
     $staged = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName' -Name 'ComputerName').ComputerName
     Write-Log ('Staged name in registry: ' + $staged)
     if ($staged -ne $NewName) {{
         Write-Log 'ERROR: post-rename verification failed.'
         exit 13
-    }}
+    }
 
     Write-Log 'Rename staged. Restart required to complete.'
     exit 0
-}}
+}
 catch {{
     Write-Log ('UNHANDLED ERROR: ' + $_.Exception.Message)
     exit 12
-}}
+}
 _END_RENAME_PS1_
 
 move __createfile "{parameter "WorkDir"}\Rename-DomainComputer.ps1"
@@ -321,16 +321,16 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-function Write-Log {
+function Write-Log {{
     param([string] $Message)
     $line = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss') + '  ' + $Message
     Write-Output $line
     Add-Content -LiteralPath $LogPath -Value $line -Encoding ASCII
 }
 
-function Get-AdminCredential {
+function Get-AdminCredential {{
     param([string] $UserName, [string] $Path)
-    if (-not $UserName -or -not $Path -or -not (Test-Path -LiteralPath $Path)) {
+    if (-not $UserName -or -not $Path -or -not (Test-Path -LiteralPath $Path)) {{
         return $null
     }
     $secret = (Get-Content -LiteralPath $Path -Raw).TrimEnd("`r", "`n")
@@ -338,16 +338,16 @@ function Get-AdminCredential {
     [PSCredential]::new($UserName, $securePw)
 }
 
-try {
+try {{
     New-Item -ItemType Directory -Path (Split-Path -Parent $LogPath) -Force | Out-Null
 
-    if (-not $Inner) {
+    if (-not $Inner) {{
         # --- Outer phase: runs as SYSTEM. Spawns the inner phase logged on as AdminUser. ---
         Write-Log ('--- BigFix action ' + $ActionId + ' started (outer/SYSTEM) ' + (Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz') + ' ---')
         Write-Log ('Running as: ' + [Security.Principal.WindowsIdentity]::GetCurrent().Name)
 
         $cred = Get-AdminCredential -UserName $AdminUser -Path $CredentialFile
-        if (-not $cred) {
+        if (-not $cred) {{
             Write-Log 'ERROR: no admin credential available to launch the inner process.'
             exit 12
         }
@@ -366,23 +366,23 @@ try {
         )
 
         $exitCode = 12
-        try {
+        try {{
             $proc = Start-Process -FilePath $psExe -Credential $cred -ArgumentList $innerArgs `
                 -WindowStyle Hidden -Wait -PassThru `
                 -RedirectStandardOutput $stdoutFile -RedirectStandardError $stderrFile
             $exitCode = $proc.ExitCode
         }
-        catch {
+        catch {{
             Write-Log ('ERROR: could not start the inner process as ' + $AdminUser + ': ' + $_.Exception.Message)
         }
-        finally {
+        finally {{
             $cred = $null
             Remove-Item -LiteralPath $CredentialFile -Force -ErrorAction SilentlyContinue
         }
 
-        foreach ($f in @($stdoutFile, $stderrFile)) {
-            if (Test-Path -LiteralPath $f) {
-                Get-Content -LiteralPath $f | Where-Object { $_ } | ForEach-Object { Write-Log ('[inner] ' + $_) }
+        foreach ($f in @($stdoutFile, $stderrFile)) {{
+            if (Test-Path -LiteralPath $f) {{
+                Get-Content -LiteralPath $f | Where-Object {{ $_ } | ForEach-Object {{ Write-Log ('[inner] ' + $_) }
                 Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue
             }
         }
@@ -399,17 +399,17 @@ try {
     Write-Log ('Running as: ' + $me.Name)
     $isAdmin = [Security.Principal.WindowsPrincipal]::new($me).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     Write-Log ('Elevated: ' + $isAdmin)
-    if (-not $isAdmin) {
+    if (-not $isAdmin) {{
         Write-Log 'ERROR: not running with an Administrators token (see UAC note in the script header).'
         exit 12
     }
 
-    if ($NewName.Length -gt 15 -or $NewName -notmatch '^[A-Za-z0-9][A-Za-z0-9-]*$' -or $NewName -match '^[0-9]+$') {
+    if ($NewName.Length -gt 15 -or $NewName -notmatch '^[A-Za-z0-9][A-Za-z0-9-]*$' -or $NewName -match '^[0-9]+$') {{
         Write-Log ('ERROR: invalid NetBIOS computer name: ' + $NewName)
         exit 10
     }
 
-    if ($env:COMPUTERNAME -eq $NewName) {
+    if ($env:COMPUTERNAME -eq $NewName) {{
         Write-Log 'Computer already has the requested name. Nothing to do.'
         exit 0
     }
@@ -418,59 +418,59 @@ try {
     Remove-Item -LiteralPath $CredentialFile -Force -ErrorAction SilentlyContinue
 
     $collision = $false
-    try {
+    try {{
         $searcher = [DirectoryServices.DirectorySearcher]::new()
         $searcher.Filter = '(&(objectCategory=computer)(cn=' + $NewName + '))'
-        if ($null -ne $searcher.FindOne()) {
+        if ($null -ne $searcher.FindOne()) {{
             $collision = $true
         }
     }
-    catch {
+    catch {{
         Write-Log ('WARNING: AD pre-flight check skipped: ' + $_.Exception.Message)
     }
-    if ($collision) {
+    if ($collision) {{
         Write-Log ('ERROR: an AD computer object named ' + $NewName + ' already exists.')
         exit 11
     }
 
     Write-Log ('Renaming ' + $env:COMPUTERNAME + ' to ' + $NewName)
     $renamed = $false
-    try {
-        if ($cred) {
+    try {{
+        if ($cred) {{
             Rename-Computer -NewName $NewName -DomainCredential $cred -Force -ErrorAction Stop
         }
-        else {
+        else {{
             Rename-Computer -NewName $NewName -Force -ErrorAction Stop
         }
         $renamed = $true
         Write-Log 'Rename-Computer succeeded.'
     }
-    catch {
+    catch {{
         Write-Log ('Rename-Computer failed: HResult=' + $_.Exception.HResult + ' ' + $_.Exception.Message)
-        $cimArgs = @{ Name = $NewName }
-        if ($cred) {
+        $cimArgs = @{{ Name = $NewName }
+        if ($cred) {{
             $cimArgs['UserName'] = $cred.UserName
             $cimArgs['Password'] = $cred.GetNetworkCredential().Password
         }
         $result = Invoke-CimMethod -ClassName Win32_ComputerSystem -MethodName Rename -Arguments $cimArgs
-        if ($result.ReturnValue -eq 0) {
+        if ($result.ReturnValue -eq 0) {{
             $renamed = $true
             Write-Log 'Win32_ComputerSystem.Rename succeeded.'
         }
-        else {
+        else {{
             Write-Log ('Win32_ComputerSystem.Rename failed with return value ' + $result.ReturnValue)
         }
     }
-    finally {
+    finally {{
         $cred = $null
     }
-    if (-not $renamed) {
+    if (-not $renamed) {{
         exit 12
     }
 
     $staged = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName' -Name 'ComputerName').ComputerName
     Write-Log ('Staged name in registry: ' + $staged)
-    if ($staged -ne $NewName) {
+    if ($staged -ne $NewName) {{
         Write-Log 'ERROR: post-rename verification failed.'
         exit 13
     }
@@ -478,7 +478,7 @@ try {
     Write-Log 'Rename staged. Restart required to complete.'
     exit 0
 }
-catch {
+catch {{
     Write-Log ('UNHANDLED ERROR: ' + $_.Exception.Message)
     exit 12
 }

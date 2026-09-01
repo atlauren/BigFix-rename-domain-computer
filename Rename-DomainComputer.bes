@@ -18,16 +18,22 @@ single action parameter, so targeting multiple computers would rename them all i
 a name collision.</P>
 
 <P><B>Requirements.</B> The supplied account needs rights on the target's AD computer object and must
-not be blocked by a "Deny log on as a batch job" policy. Domain controllers are excluded by relevance;
+not be blocked by a "Deny log on as a batch job" policy. The <TT>Secondary Logon</TT> service
+(<TT>seclogon</TT>) must be able to run on the endpoint; <TT>runas=localuser</TT> depends on it, and the
+action starts it if it is not already running. Domain controllers are excluded by relevance;
 renaming a DC requires <TT>netdom computername</TT> instead.</P>
 
 <P><B>Result.</B> On success the computer is flagged as requiring a restart; the rename completes on
 reboot. A log is left at <TT>&lt;BES Client&gt;\__BESData\__Global\Logs\rename-computer.log</TT>.</P>
+
+<P><B>Diagnostic action.</B> A second action, <I>RunAsLocalUser test</I>, is available from the Take
+Action dialog. It performs no rename; it only exercises the same <TT>override runas=localuser</TT>
+elevation used above, so you can tell whether a failure is caused by elevation itself versus the
+rename logic. It logs to the same file as the main action.</P>
 		]]></Description>
 		<Relevance>windows of operating system</Relevance>
 		<Relevance>version of client &gt;= "11.0.4"</Relevance>
-		<Relevance>exists select objects "PartOfDomain from Win32_ComputerSystem" whose ((property "partofdomain" of it) as string as lowercase = "true") of wmi</Relevance>
-		<Relevance>not exists select objects "ProductType from Win32_OperatingSystem" whose ((property "producttype" of it) as string = "2") of wmi</Relevance>
+		<Relevance>exists dns domainname of local computer of active directory</Relevance>
 		<Relevance>exists value "PowerShellVersion" whose (it as string as version &gt;= "5.0") of key "HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\PowerShell\3\PowerShellEngine" of native registry</Relevance>
 		<Category>Configuration</Category>
 		<Source>Internal</Source>
@@ -38,7 +44,7 @@ reboot. A log is left at <TT>&lt;BES Client&gt;\__BESData\__Global\Logs\rename-c
 		<SANSID></SANSID>
 		<MIMEField>
 			<Name>x-fixlet-modification-time</Name>
-			<Value>Sat, 30 Aug 2026 00:00:00 +0000</Value>
+			<Value>Sun, 30 Aug 2026 00:00:00 +0000</Value>
 		</MIMEField>
 		<Domain>BESC</Domain>
 		<DefaultAction ID="Action1">
@@ -180,6 +186,9 @@ _END_RENAME_PS1_
 
 move __createfile "{parameter "WorkDir"}\Rename-DomainComputer.ps1"
 
+// runas=localuser depends on the Secondary Logon service; some endpoints leave it stopped.
+waithidden "{pathname of system folder}\sc.exe" start seclogon
+
 // Only one password may be supplied per action, so there must be exactly one override block.
 override wait
 completion=process
@@ -188,7 +197,7 @@ runas=localuser
 asadmin=true
 user={parameter "AdminUser" of action}
 password=required
-wait "{pathname of system folder}\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{parameter "WorkDir"}\Rename-DomainComputer.ps1" -NewName "{parameter "NewComputerName" of action}" -ActionId "{id of action}" -LogPath "{pathname of client folder}\__BESData\__Global\Logs\rename-computer.log"
+wait "{pathname of system folder}\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{parameter "WorkDir"}\Rename-DomainComputer.ps1" -NewName "{parameter "NewComputerName" of action}" -ActionId "{id of action}" -LogPath "{storage folder of client}\__BESData\__Global\Logs\rename-computer.log"
 
 continue if {exit code of action = 0}
 
@@ -198,5 +207,52 @@ action requires restart "This computer was renamed. A restart is required to com
 			]]></ActionScript>
 			<SuccessCriteria Option="RunToCompletion"></SuccessCriteria>
 		</DefaultAction>
+			<Action ID="Action2">
+				<Description>
+					<PreLink>Click </PreLink>
+					<Link>here</Link>
+					<PostLink> to run a RunAsLocalUser diagnostic test (no rename is performed).</PostLink>
+				</Description>
+				<ActionScript MIMEType="application/x-Fixlet-Windows-Shell"><![CDATA[
+// Diagnostic only: isolates whether RunAsLocalUser elevation works on this endpoint,
+// independent of the rename logic in the main action. Performs no rename.
+// 2026-08-31 atlauren / Claude
+
+action uses wow64 redirection false
+
+action parameter query "AdminUser" with description "Domain account to test RunAsLocalUser with (DOMAIN\user or user@domain.tld):"
+
+continue if {(parameter "AdminUser" of action) != ""}
+
+parameter "WorkDir" = "{(value of variable "ProgramData" of environment) & "\BigFix\RenameComputer"}"
+folder create "{parameter "WorkDir"}"
+
+waithidden "{pathname of system folder}\icacls.exe" "{parameter "WorkDir"}" /inheritance:r /grant "*S-1-5-18:(OI)(CI)F" /grant "*S-1-5-32-544:(OI)(CI)F"
+
+delete "{parameter "WorkDir"}\RunAsLocalUserTest.bat"
+
+createfile until _END_TEST_BAT_
+@echo off
+echo %DATE% %TIME%  [RunAsLocalUser TEST action:{id of action}] logon OK, running as %USERNAME% >> "{storage folder of client}\__BESData\__Global\Logs\rename-computer.log"
+_END_TEST_BAT_
+
+move __createfile "{parameter "WorkDir"}\RunAsLocalUserTest.bat"
+
+// Same override syntax as the main action, to isolate whether RunAsLocalUser itself is the problem.
+override wait
+completion=process
+hidden=true
+runas=localuser
+asadmin=true
+user={parameter "AdminUser" of action}
+password=required
+wait "{pathname of system folder}\cmd.exe" /c "{parameter "WorkDir"}\RunAsLocalUserTest.bat"
+
+continue if {exit code of action = 0}
+
+delete "{parameter "WorkDir"}\RunAsLocalUserTest.bat"
+				]]></ActionScript>
+				<SuccessCriteria Option="RunToCompletion"></SuccessCriteria>
+			</Action>
 	</Task>
 </BES>

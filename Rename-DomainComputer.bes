@@ -196,6 +196,9 @@ move __createfile "{parameter "WorkDir"}\Rename-DomainComputer.ps1"
 // runas=localuser depends on the Secondary Logon service; some endpoints leave it stopped.
 waithidden "{pathname of system folder}\sc.exe" start seclogon
 
+// Diagnostic: record seclogon's actual state (a disabled service fails silently above).
+waithidden "{pathname of system folder}\cmd.exe" /c ""{pathname of system folder}\sc.exe" query seclogon >> "{storage folder of client}\__BESData\__Global\Logs\rename-computer.log" 2>&1"
+
 // Only one password may be supplied per action, so there must be exactly one override block.
 override wait
 completion=process
@@ -244,6 +247,10 @@ echo %DATE% %TIME%  [RunAsLocalUser TEST action:{id of action}] logon OK, runnin
 _END_TEST_BAT_
 
 move __createfile "{parameter "WorkDir"}\RunAsLocalUserTest.bat"
+
+// Diagnostic: record seclogon's actual state (a disabled service fails silently if started).
+waithidden "{pathname of system folder}\sc.exe" start seclogon
+waithidden "{pathname of system folder}\cmd.exe" /c ""{pathname of system folder}\sc.exe" query seclogon >> "{storage folder of client}\__BESData\__Global\Logs\rename-computer.log" 2>&1"
 
 // Same override syntax as the main action, to isolate whether RunAsLocalUser itself is the problem.
 override wait

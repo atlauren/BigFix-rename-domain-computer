@@ -759,13 +759,17 @@ move __createfile "{parameter "WorkDir"}\admin-schtask.cred"
 // does the domain-user logon itself via the Task Scheduler service.
 waithidden "{pathname of system folder}\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{parameter "WorkDir"}\Rename-DomainComputer-ScheduledTask.ps1" -NewName "{parameter "NewComputerName" of action}" -AdminUser "{parameter "AdminUser" of action}" -CredentialFile "{parameter "WorkDir"}\admin-schtask.cred" -ActionId "{id of action}" -LogPath "{storage folder of client}\__BESData\__Global\Logs\rename-computer.log"
 
+// Capture the real result before any further waithidden calls overwrite "exit code of action".
+parameter "RenameResult" = "{exit code of action}"
+
 // Best-effort cleanup regardless of outcome; the script already deletes the credential file
 // and unregisters the task itself. This second delete needs no secret, so it is safe to run
-// unconditionally even if the script above failed partway through.
+// unconditionally even if the script above failed partway through; schtasks.exe returns a
+// non-zero exit code here whenever the task was already cleaned up, which is the normal case.
 delete "{parameter "WorkDir"}\admin-schtask.cred"
 waithidden "{pathname of system folder}\schtasks.exe" /Delete /TN "BigFixRenameComputer-{id of action}" /F
 
-continue if {exit code of action = 0}
+continue if {(parameter "RenameResult" of action) = "0"}
 
 delete "{parameter "WorkDir"}\Rename-DomainComputer-ScheduledTask.ps1"
 

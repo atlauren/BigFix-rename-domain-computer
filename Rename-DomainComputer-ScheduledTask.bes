@@ -1,0 +1,314 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
+	<Task>
+		<Title>Rename Domain-Joined Windows Computer (Scheduled Task, Secure Parameters)</Title>
+		<Description><![CDATA[
+<P>Renames a domain-joined Windows computer via a Scheduled Task registered and run under a
+supplied domain account (LogonType Password, RunLevel Highest), instead of BigFix's own
+<TT>override runas=localuser</TT> elevation. This is a fork of the "Scheduled Task rename"
+diagnostic action from the main Rename Domain-Joined Windows Computer task, using a custom
+HTML/JavaScript form and Secure Parameters instead of a plain action parameter query, so the
+account's password is masked on entry instead of shown in cleartext as typed.</P>
+
+<P><B>Requirements.</B> The supplied account must already be a local Administrator on the target
+endpoint and have rights to rename the computer's AD object - there is no equivalent of
+<TT>asadmin=true</TT> that synthesizes local Administrator rights for a non-admin account.</P>
+
+<P><B>Scope warning.</B> Take this action against <B>one endpoint at a time</B>. The new name is a
+single value, so targeting multiple computers would rename them all identically and cause a name
+collision.</P>
+
+<P><B>Result.</B> On success the computer is flagged as requiring a restart; the rename completes
+on reboot. A log is left at <TT>&lt;BES Client&gt;\__BESData\__Global\Logs\rename-computer.log</TT>.</P>
+
+<P>Supply the new computer name and the domain account's credentials below. The password field is
+masked and delivered as a Secure Parameter - it is not shown in cleartext in this dialog, and is
+not remembered as a default the way a plain action parameter would be.</P>
+
+<P>
+<LABEL for=newComputerName>New computer name (NetBIOS, max 15 characters): </LABEL><INPUT id=newComputerName name=newComputerName><BR>
+<LABEL for=adminUser>Domain account (DOMAIN\user or user@domain.tld): </LABEL><INPUT id=adminUser name=adminUser><BR>
+<LABEL for=adminPw>Account password: </LABEL><INPUT id=adminPw type=password name=adminPw><BR>
+<LABEL for=adminPw2>Verify password: </LABEL><INPUT id=adminPw2 type=password name=adminPw2>
+</P>
+<script>
+			document.body.ontakeaction = function() {
+				var newComputerName = document.getElementById( "newComputerName" ).value;
+				var adminUser = document.getElementById( "adminUser" ).value;
+				var adminPw = document.getElementById( "adminPw" ).value;
+				var adminPw2 = document.getElementById( "adminPw2" ).value;
+				if (!newComputerName || newComputerName.length > 15 || !/^[A-Za-z0-9][A-Za-z0-9-]*$/.test(newComputerName) || /^[0-9]+$/.test(newComputerName)) {
+					alert ("Please enter a valid NetBIOS computer name (max 15 characters, letters/digits/hyphen only, not all digits)."); return false; };
+				if (!adminUser) {
+					alert ("Please enter the domain account."); return false; };
+				if (adminPw==null || adminPw=="") {
+					alert ("The account's password is required."); return false; };
+				if (adminPw !== adminPw2) {
+					alert ("The passwords do not match."); return false; };
+				else {TakeSecureFixletAction(Relevance('id of current fixlet'), Relevance('id of current bes site'), "Action1", {}, { newComputerName: newComputerName, adminUser: adminUser, adminPw: adminPw}); }
+				return false; }
+			</script> ]]></Description>
+		<Relevance>windows of operating system</Relevance>
+		<Relevance>version of client &gt;= "11.0.4"</Relevance>
+		<Relevance>exists dns domainname of local computer of active directory</Relevance>
+		<Relevance>exists value "PowerShellVersion" whose (it as string as version &gt;= "5.0") of key "HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\PowerShell\3\PowerShellEngine" of native registry</Relevance>
+		<Category>Configuration</Category>
+		<Source>Internal</Source>
+		<SourceID>Rename-DomainComputer-ScheduledTask-SecureParam</SourceID>
+		<SourceReleaseDate>2026-09-01</SourceReleaseDate>
+		<SourceSeverity></SourceSeverity>
+		<CVENames></CVENames>
+		<SANSID></SANSID>
+		<MIMEField>
+			<Name>x-fixlet-modification-time</Name>
+			<Value>Tue, 01 Sep 2026 00:00:00 +0000</Value>
+		</MIMEField>
+		<Domain>BESC</Domain>
+		<DefaultAction ID="Action1">
+			<Description>
+				<PreLink>Click </PreLink>
+				<Link>here</Link>
+				<PostLink> to rename this computer using the Scheduled Task diagnostic.</PostLink>
+			</Description>
+			<ActionScript MIMEType="application/x-Fixlet-Windows-Shell"><![CDATA[
+// Diagnostic: renames the computer via a SYSTEM-registered Scheduled Task that runs under
+// adminUser (LogonType Password, RunLevel Highest). Forked from the main Task's Action 4 to
+// use HTML/JS Secure Parameters (see Description) instead of a plain action parameter query,
+// so the account's password is masked on entry instead of shown in cleartext as typed.
+// IMPORTANT: this does NOT synthesize local Administrator rights - adminUser must already be a
+// local Administrator on this endpoint, or the task will fail its elevation check.
+// See Rename-DomainComputer-ScheduledTask.ps1.
+// 2026-09-01 atlauren / Claude
+
+action uses wow64 redirection false
+
+// newComputerName, adminUser, and adminPw arrive as Secure/public Parameters supplied by the
+// Description's custom HTML form and TakeSecureFixletAction, not via action parameter query -
+// the native prompt dialog (and its unmasked password entry) is bypassed for this action.
+
+// Validate before touching the endpoint.
+continue if {(length of it >= 1 and length of it <= 15) of (parameter "newComputerName" of action)}
+continue if {exists match (regex "^[A-Za-z0-9][A-Za-z0-9-]*$") of (parameter "newComputerName" of action)}
+continue if {not exists match (regex "^[0-9]+$") of (parameter "newComputerName" of action)}
+continue if {(parameter "adminUser" of action) != ""}
+continue if {(parameter "adminPw" of action) != ""}
+
+parameter "WorkDir" = "{(value of variable "ProgramData" of environment) & "\BigFix\RenameComputer"}"
+folder create "{parameter "WorkDir"}"
+
+// The payload runs elevated, so deny non-administrators the ability to tamper with it.
+waithidden "{pathname of system folder}\icacls.exe" "{parameter "WorkDir"}" /inheritance:r /grant "*S-1-5-18:(OI)(CI)F" /grant "*S-1-5-32-544:(OI)(CI)F"
+
+delete "{parameter "WorkDir"}\Rename-DomainComputer-ScheduledTask.ps1"
+
+createfile until _END_RENAME_SCHTASK_PS1_
+#Requires -Version 5.0
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $true)]
+    [string] $NewName,
+
+    [string] $AdminUser = '',
+
+    # Path to a one-time file holding the domain account's password; read, then deleted.
+    [string] $CredentialFile = '',
+
+    # Set automatically when Task Scheduler invokes this script as AdminUser; do not pass by hand.
+    [switch] $Inner,
+
+    [string] $ActionId = 'manual',
+
+    [string] $LogPath = (Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) 'BigFix Enterprise\BES Client\__BESData\__Global\Logs\rename-computer.log')
+)
+
+$ErrorActionPreference = 'Stop'
+
+function Write-Log {{
+    param([string] $Message)
+    $line = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss') + '  ' + $Message
+    Write-Output $line
+    Add-Content -LiteralPath $LogPath -Value $line -Encoding ASCII
+}
+
+try {{
+    New-Item -ItemType Directory -Path (Split-Path -Parent $LogPath) -Force | Out-Null
+
+    if (-not $Inner) {{
+        # --- Outer phase: runs as SYSTEM. Registers and runs a Scheduled Task as AdminUser. ---
+        Write-Log ('--- BigFix action ' + $ActionId + ' started (outer/SYSTEM) ' + (Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz') + ' ---')
+        Write-Log ('Running as: ' + [Security.Principal.WindowsIdentity]::GetCurrent().Name)
+
+        if (-not $AdminUser -or -not $CredentialFile -or -not (Test-Path -LiteralPath $CredentialFile)) {{
+            Write-Log 'ERROR: no admin credential available to register the scheduled task.'
+            exit 14
+        }
+
+        $self = $MyInvocation.MyCommand.Path
+        $taskName = 'BigFixRenameComputer-' + $ActionId
+        $psExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $innerArgs = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $self + '" -NewName "' + $NewName + '" -Inner -ActionId "' + $ActionId + '" -LogPath "' + $LogPath + '"'
+
+        $exitCode = 14
+        $registered = $false
+        try {{
+            $secret = (Get-Content -LiteralPath $CredentialFile -Raw).TrimEnd("`r", "`n")
+            $plainPassword = $secret
+            $secret = $null
+
+            $action = New-ScheduledTaskAction -Execute $psExe -Argument $innerArgs
+            $settings = New-ScheduledTaskSettingsSet -Hidden -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
+
+            Register-ScheduledTask -TaskName $taskName -Action $action -Settings $settings `
+                -User $AdminUser -Password $plainPassword -RunLevel Highest -Force | Out-Null
+            $plainPassword = $null
+            $registered = $true
+            Write-Log ('Scheduled task ' + $taskName + ' registered, starting it now.')
+
+            Start-ScheduledTask -TaskName $taskName
+
+            $deadline = (Get-Date).AddMinutes(4)
+            $result = $null
+            do {{
+                Start-Sleep -Milliseconds 500
+                $state = (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue).State
+            } while ($state -eq 'Running' -and (Get-Date) -lt $deadline)
+
+            if ($state -eq 'Running') {{
+                Write-Log 'ERROR: timed out waiting for the scheduled task to finish.'
+                $exitCode = 15
+            }
+            else {{
+                $info = Get-ScheduledTaskInfo -TaskName $taskName
+                $exitCode = $info.LastTaskResult
+                Write-Log ('Scheduled task LastTaskResult: ' + $exitCode)
+            }
+        }
+        catch {{
+            Write-Log ('ERROR: could not register/run the scheduled task as ' + $AdminUser + ': ' + $_.Exception.Message)
+        }
+        finally {{
+            $plainPassword = $null
+            Remove-Item -LiteralPath $CredentialFile -Force -ErrorAction SilentlyContinue
+            if ($registered) {{
+                Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+            }
+        }
+
+        Write-Log ('Inner task exit code: ' + $exitCode)
+        exit $exitCode
+    }
+
+    # --- Inner phase: runs as AdminUser, via the Scheduled Task registered above. ---
+    Write-Log ('--- BigFix action ' + $ActionId + ' started (inner/' + [Security.Principal.WindowsIdentity]::GetCurrent().Name + ') ' + (Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz') + ' ---')
+    Write-Log ('Rename requested: ' + $NewName)
+
+    $me = [Security.Principal.WindowsIdentity]::GetCurrent()
+    Write-Log ('Running as: ' + $me.Name)
+    $isAdmin = [Security.Principal.WindowsPrincipal]::new($me).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    Write-Log ('Elevated: ' + $isAdmin)
+    if (-not $isAdmin) {{
+        Write-Log 'ERROR: not running with an Administrators token (see UAC note in the script header).'
+        exit 12
+    }
+
+    if ($NewName.Length -gt 15 -or $NewName -notmatch '^[A-Za-z0-9][A-Za-z0-9-]*$' -or $NewName -match '^[0-9]+$') {{
+        Write-Log ('ERROR: invalid NetBIOS computer name: ' + $NewName)
+        exit 10
+    }
+
+    if ($env:COMPUTERNAME -eq $NewName) {{
+        Write-Log 'Computer already has the requested name. Nothing to do.'
+        exit 0
+    }
+
+    $collision = $false
+    try {{
+        $searcher = [DirectoryServices.DirectorySearcher]::new()
+        $searcher.Filter = '(&(objectCategory=computer)(cn=' + $NewName + '))'
+        if ($null -ne $searcher.FindOne()) {{
+            $collision = $true
+        }
+    }
+    catch {{
+        Write-Log ('WARNING: AD pre-flight check skipped: ' + $_.Exception.Message)
+    }
+    if ($collision) {{
+        Write-Log ('ERROR: an AD computer object named ' + $NewName + ' already exists.')
+        exit 11
+    }
+
+    Write-Log ('Renaming ' + $env:COMPUTERNAME + ' to ' + $NewName)
+    $renamed = $false
+    try {{
+        # Genuinely logged on as the domain account here, so ambient identity is used directly.
+        Rename-Computer -NewName $NewName -Force -ErrorAction Stop
+        $renamed = $true
+        Write-Log 'Rename-Computer succeeded.'
+    }
+    catch {{
+        Write-Log ('Rename-Computer failed: HResult=' + $_.Exception.HResult + ' ' + $_.Exception.Message)
+        $result = Invoke-CimMethod -ClassName Win32_ComputerSystem -MethodName Rename -Arguments @{{ Name = $NewName }
+        if ($result.ReturnValue -eq 0) {{
+            $renamed = $true
+            Write-Log 'Win32_ComputerSystem.Rename succeeded.'
+        }
+        else {{
+            Write-Log ('Win32_ComputerSystem.Rename failed with return value ' + $result.ReturnValue)
+        }
+    }
+    if (-not $renamed) {{
+        exit 12
+    }
+
+    $staged = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName' -Name 'ComputerName').ComputerName
+    Write-Log ('Staged name in registry: ' + $staged)
+    if ($staged -ne $NewName) {{
+        Write-Log 'ERROR: post-rename verification failed.'
+        exit 13
+    }
+
+    Write-Log 'Rename staged. Restart required to complete.'
+    exit 0
+}
+catch {{
+    Write-Log ('UNHANDLED ERROR: ' + $_.Exception.Message)
+    exit 12
+}
+_END_RENAME_SCHTASK_PS1_
+
+move __createfile "{parameter "WorkDir"}\Rename-DomainComputer-ScheduledTask.ps1"
+
+// Written via createfile (not a shell command) so shell metacharacters in the password can't
+// be interpreted; the file inherits the SYSTEM/Administrators-only ACL set above on WorkDir.
+delete "{parameter "WorkDir"}\admin-schtask.cred"
+
+createfile until _END_ADMIN_SCHTASK_CRED_
+{parameter "adminPw" of action}
+_END_ADMIN_SCHTASK_CRED_
+
+move __createfile "{parameter "WorkDir"}\admin-schtask.cred"
+
+// No override/runas and no seclogon dependency here; Register-ScheduledTask inside the script
+// does the domain-user logon itself via the Task Scheduler service.
+waithidden "{pathname of system folder}\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{parameter "WorkDir"}\Rename-DomainComputer-ScheduledTask.ps1" -NewName "{parameter "newComputerName" of action}" -AdminUser "{parameter "adminUser" of action}" -CredentialFile "{parameter "WorkDir"}\admin-schtask.cred" -ActionId "{id of action}" -LogPath "{storage folder of client}\__BESData\__Global\Logs\rename-computer.log"
+
+// Capture the real result before any further waithidden calls overwrite "exit code of action".
+parameter "RenameResult" = "{exit code of action}"
+
+// Best-effort cleanup regardless of outcome; the script already deletes the credential file
+// and unregisters the task itself. This second delete needs no secret, so it is safe to run
+// unconditionally even if the script above failed partway through; schtasks.exe returns a
+// non-zero exit code here whenever the task was already cleaned up, which is the normal case.
+delete "{parameter "WorkDir"}\admin-schtask.cred"
+waithidden "{pathname of system folder}\schtasks.exe" /Delete /TN "BigFixRenameComputer-{id of action}" /F
+
+continue if {(parameter "RenameResult" of action) = "0"}
+
+delete "{parameter "WorkDir"}\Rename-DomainComputer-ScheduledTask.ps1"
+
+action requires restart "This computer was renamed. A restart is required to complete the change."
+			]]></ActionScript>
+			<SuccessCriteria Option="RunToCompletion"></SuccessCriteria>
+		</DefaultAction>
+	</Task>
+</BES>

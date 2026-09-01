@@ -2,6 +2,8 @@
 
 This collection of BigFix action files and PowerShell scripts are attempts to rename a domain computer, using BigFix and provided elevated credentials.  
 
+The raw lift was "vibe coded" with Claude/Sonnet5, with heavy hand-tuning by me.
+
 As of this writing, only the Scheduled Task item actually accomplishes the goal. Other methods fail with exit code `1783`. 
 
 The files are:

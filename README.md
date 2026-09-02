@@ -13,12 +13,19 @@ The files are:
 ## **Rename-DomainComputer.bes** 
 the main BigFix Task, with four actions:
   1. **DefaultAction** — the production rename, elevating via BigFix's own `override runas=localuser`/`asadmin=true`/`password=required`. Embeds `Rename-DomainComputer.ps1`.
+  
      *Password handling:* `password=required` makes the Console prompt for it with a **masked** field and ship it to the agent as a SecureParameter. The agent consumes it directly in its own process-creation call, so it never reaches the action script, the embedded PowerShell, the disk, or the client logs. This is the cleanest handling of the four, but the SecureParameter is only usable by the `override` block itself — it cannot be pulled into `{parameter "..." of action}` for use anywhere else, which is why the other actions cannot reuse it.
+
   2. **Action2** — a diagnostic that exercises the same `runas=localuser` elevation with no rename logic at all, to isolate elevation failures from rename-logic failures.
+  
      *Password handling:* identical to DefaultAction — masked SecureParameter via `password=required`, consumed only by the `override` block.
+     
   3. **Action3** — a diagnostic rename that elevates via a SYSTEM-launched PowerShell spawning an inner `Start-Process -Credential` session instead of BigFix's own elevation. Embeds `Rename-DomainComputer-Nested.ps1`. Requires the account to already be a local Administrator; gets a UAC-filtered token even then.
-     *Password handling:* collected by a plain `action parameter query`, which is **unmasked** — shown in cleartext as typed and remembered as a default. The action script then writes it with `createfile` (no shell is involved, so metacharacters in the password can't be interpreted) to `%ProgramData%\BigFix\RenameComputer\admin-nested.cred`, in a folder ACL'd to SYSTEM and Administrators only. Only the *path* is passed on a command line. The script reads it into a `PSCredential`, deletes the file immediately, and the action script deletes it again unconditionally as a safety net.
+  
+     *Password handling:* collected by a plain `action parameter query`, which is **unmasked** — shown in cleartext as typed and remembered as a default. The action script then writes it with `createfile` (no shell is involved, so metacharacters in the password can't be interpreted) to `%ProgramData%\BigFix\RenameComputer\admin-nested.cred`, in a folder ACL'd to SYSTEM and Administrators only. Only the *path* is passed on a command line. The script reads it into a `PSCredential`, deletes the file immediately, and the action script deletes it again unconditionally as a safety net. 
+     
   4. **Action4** — a diagnostic rename that elevates via a SYSTEM-registered Scheduled Task (`Register-ScheduledTask`, LogonType Password, RunLevel Highest) instead of BigFix's own elevation or `Start-Process -Credential`. Embeds `Rename-DomainComputer-ScheduledTask.ps1`. Requires the account to already be a local Administrator, but (unlike Action3) gets a full, unfiltered admin token.
+  
      *Password handling:* same **unmasked** `action parameter query` and same ACL'd `createfile` credential-file transport as Action3, using `admin-schtask.cred`. From there it is passed to `Register-ScheduledTask` in-process, never via `schtasks.exe /RP`, so it never appears on any command line or in 4688/Sysmon process auditing. Task Scheduler holds it in its own encrypted credential store until the task is unregistered, which the script does in a `finally` block, with a `schtasks /Delete` safety net in the action script.
 
 ## **Rename-DomainComputer.ps1**

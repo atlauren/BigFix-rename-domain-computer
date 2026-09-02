@@ -29,3 +29,9 @@ the editable source of truth for Action4's embedded script (outer/SYSTEM phase r
 ## **Rename-DomainComputer-ScheduledTask.bes**
 a standalone, single-action BigFix Task forking Action4's exact rename mechanism, but collecting the new computer name and credentials via a custom HTML form (`document.body.ontakeaction` + `TakeSecureFixletAction`) instead of a plain action parameter query, so the account's password is masked on entry rather than shown in cleartext as typed.
 
+## **Rename-DomainComputer-SystemCredential.ps1**
+the editable source of truth for `Rename-DomainComputer-SystemCredential.bes`'s embedded script. It performs no local logon at all: the payload stays in the agent's own `NT AUTHORITY\SYSTEM` context (already fully elevated locally) and passes the supplied account to `Rename-Computer` as `-DomainCredential`, i.e. as network credentials for the AD computer-object update only. The account therefore does not need to be a local Administrator on the endpoint, and no "deny logon" policy applies.
+
+## **Rename-DomainComputer-SystemCredential.bes**
+a standalone, single-action BigFix Task wrapping the above, using the same masked HTML/Secure Parameter form as `Rename-DomainComputer-ScheduledTask.bes`. This is the one variant that avoids every local-logon mechanism that has failed on this endpoint — `override runas=localuser` (RPC 1783), `Start-Process -Credential` (Session 0 window station, access denied) and Task Scheduler's batch logon.
+

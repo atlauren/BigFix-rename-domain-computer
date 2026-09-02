@@ -1,10 +1,12 @@
 # BigFix-rename-domain-computer
 
-This collection of BigFix action files and PowerShell scripts are attempts to rename a domain computer, using BigFix and provided elevated credentials.  
+This collection of BigFix action files and PowerShell scripts are explorative attempts to rename a domain computer, using BigFix and provided elevated credentials.  
 
 The raw lift was "vibe coded" with Claude/Sonnet5, with heavy hand-tuning by me.
 
-As of this writing, only the Scheduled Task item actually accomplishes the goal. Other methods fail with exit code `1783`. 
+As of this writing, only the Scheduled Task item actually accomplishes the goal. 
+* Attempts using BigFix `override / runas=localuser` fail with exit code `1783`.
+* The Action3 PowerShell attempt fails with a vague "Access is denied.
 
 The files are:
 
@@ -19,7 +21,7 @@ the main BigFix Task, with four actions:
 the editable source of truth for the DefaultAction's embedded rename script (renames via ambient/`-DomainCredential` identity, verifies the result, and requests a restart).
 
 ## **Rename-DomainComputer-Nested.ps1** 
-— the editable source of truth for Action3's embedded script (outer/SYSTEM phase spawns an inner phase logged on as the supplied account via `Start-Process -Credential`, which performs the actual rename).
+the editable source of truth for Action3's embedded script (outer/SYSTEM phase spawns an inner phase logged on as the supplied account via `Start-Process -Credential`, which performs the actual rename).
 
 ## **Rename-DomainComputer-ScheduledTask.ps1** 
 the editable source of truth for Action4's embedded script (outer/SYSTEM phase registers and runs a Scheduled Task as the supplied account, which performs the actual rename); also reused as-is by `Rename-DomainComputer-ScheduledTask.bes` below.
